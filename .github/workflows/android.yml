@@ -50,9 +50,15 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: CleanRate-unsigned-${{ github.sha }}
-          path: |
-            app/build/outputs/apk/release/app-release-unsigned.apk
-            app/build/outputs/mapping/release/mapping.txt
+          path: app/build/outputs/apk/release/app-release-unsigned.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Сохранить таблицу деобфускации
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: CleanRate-mapping-${{ github.sha }}
+          path: app/build/outputs/mapping/release/mapping.txt
           if-no-files-found: error
           retention-days: 14
 
@@ -72,6 +78,9 @@ jobs:
         with:
           name: CleanRate-unsigned-${{ github.sha }}
           path: release
+
+      - name: Проверить состав артефакта
+        run: test -f release/app-release-unsigned.apk
 
       - name: Подтвердить происхождение APK
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1

@@ -32,6 +32,7 @@ data class ConverterUiState(
     val manualRates: Map<String, BigDecimal>,
     val keySoundEnabled: Boolean,
     val keyVibrationEnabled: Boolean,
+    val isChartVisible: Boolean = false,
     val activeCode: String = "RUB",
     val expression: String = "1000",
     val amount: BigDecimal = BigDecimal("1000"),
@@ -80,6 +81,7 @@ class ConverterViewModel(application: Application) : AndroidViewModel(applicatio
             manualRates = marketRepository.loadManualRates(),
             keySoundEnabled = marketRepository.loadKeySoundEnabled(),
             keyVibrationEnabled = marketRepository.loadKeyVibrationEnabled(),
+            isChartVisible = marketRepository.loadChartVisible(),
             activeCode = restoredSession?.activeCode ?: initialFavorites.first(),
             expression = restoredSession?.expression ?: "1000",
             amount = restoredSession?.amount ?: BigDecimal("1000"),
@@ -194,6 +196,14 @@ class ConverterViewModel(application: Application) : AndroidViewModel(applicatio
     fun setKeyVibrationEnabled(enabled: Boolean) {
         marketRepository.saveKeyVibrationEnabled(enabled)
         _uiState.update { it.copy(keyVibrationEnabled = enabled) }
+    }
+
+    fun openChart() {
+        setChartVisible(true)
+    }
+
+    fun closeChart() {
+        setChartVisible(false)
     }
 
     fun selectCurrency(code: String) {
@@ -332,6 +342,12 @@ class ConverterViewModel(application: Application) : AndroidViewModel(applicatio
             amount = state.amount,
             justEvaluated = state.justEvaluated,
         )
+    }
+
+    private fun setChartVisible(visible: Boolean) {
+        if (_uiState.value.isChartVisible == visible) return
+        marketRepository.saveChartVisible(visible)
+        _uiState.update { it.copy(isChartVisible = visible) }
     }
 
     companion object {

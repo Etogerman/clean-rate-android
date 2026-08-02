@@ -17,6 +17,12 @@ data class ConverterSession(
     val justEvaluated: Boolean,
 )
 
+private data class ValidatedRateDownload(
+    val rawJson: String,
+    val snapshot: RateSnapshot,
+    val checkedAtMillis: Long,
+)
+
 class CurrencyRepository(private val context: Context) {
     private val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
 
@@ -43,23 +49,12 @@ class CurrencyRepository(private val context: Context) {
     suspend fun refreshRates(): Result<RateSnapshot> = withContext(Dispatchers.IO) {
         preferences.edit { putLong(KEY_LAST_ATTEMPT, System.currentTimeMillis()) }
         try {
-            val body = downloadRates()
-            val checkedAtMillis = System.currentTimeMillis()
-            val snapshot = checkNotNull(
-                MarketRateParser.parse(
-                    rawJson = body,
-                    loadedFromSeed = false,
-                    lastCheckedEpochSeconds = checkedAtMillis / 1_000L,
-                    requireFresh = true,
-                ),
-            ) {
-                "Сервис вернул некорректные данные"
-            }
+            val download = downloadRates()
             preferences.edit {
-                putString(KEY_RATE_JSON, body)
-                putLong(KEY_LAST_SUCCESS, checkedAtMillis)
+                putString(KEY_RATE_JSON, download.rawJson)
+                putLong(KEY_LAST_SUCCESS, download.checkedAtMillis)
             }
-            Result.success(snapshot)
+            Result.success(download.snapshot)
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (error: Throwable) {
@@ -143,6 +138,12 @@ class CurrencyRepository(private val context: Context) {
         preferences.edit { putBoolean(KEY_KEY_VIBRATION_ENABLED, enabled) }
     }
 
+    fun loadChartVisible(): Boolean = preferences.getBoolean(KEY_CHART_VISIBLE, false)
+
+    fun saveChartVisible(visible: Boolean) {
+        preferences.edit { putBoolean(KEY_CHART_VISIBLE, visible) }
+    }
+
     fun loadConverterSession(): ConverterSession? = parseConverterSession(
         activeCode = preferences.getString(KEY_ACTIVE_CODE, null),
         expression = preferences.getString(KEY_LAST_EXPRESSION, null),
@@ -164,21 +165,30 @@ class CurrencyRepository(private val context: Context) {
         }
     }
 
-    private fun downloadRates(): String {
-        var lastError: Throwable? = null
-        RATES_URLS.forEach { address ->
-            try {
-                return request(address)
-            } catch (cancellation: CancellationException) {
-                throw cancellation
-            } catch (error: Throwable) {
-                lastError = error
-            }
+    private suspend fun downloadRates(): ValidatedRateDownload = firstValidSource(
+        sources = RATES_URLS,
+        unavailableMessage = "Источник курсов недоступен",
+    ) { address ->
+        val body = request(address)
+        val checkedAtMillis = System.currentTimeMillis()
+        val snapshot = checkNotNull(
+            MarketRateParser.parse(
+                rawJson = body,
+                loadedFromSeed = false,
+                lastCheckedEpochSeconds = checkedAtMillis / 1_000L,
+                requireFresh = true,
+            ),
+        ) {
+            "Сервис вернул некорректные данные"
         }
-        throw lastError ?: IllegalStateException("Источник курсов недоступен")
+        ValidatedRateDownload(
+            rawJson = body,
+            snapshot = snapshot,
+            checkedAtMillis = checkedAtMillis,
+        )
     }
 
-    private fun request(address: String): String {
+    private suspend fun request(address: String): String {
         return HttpsClient.getText(
             address = address,
             accept = "application/json",
@@ -203,6 +213,7 @@ class CurrencyRepository(private val context: Context) {
         private const val KEY_UI_LANGUAGE = "ui_language"
         private const val KEY_KEY_SOUND_ENABLED = "key_sound_enabled"
         private const val KEY_KEY_VIBRATION_ENABLED = "key_vibration_enabled"
+        private const val KEY_CHART_VISIBLE = "chart_visible"
         private const val KEY_ACTIVE_CODE = "active_code"
         private const val KEY_LAST_EXPRESSION = "last_expression"
         private const val KEY_LAST_AMOUNT = "last_amount"

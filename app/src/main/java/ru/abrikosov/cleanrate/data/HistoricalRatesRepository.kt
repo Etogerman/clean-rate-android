@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.core.content.edit
 import java.time.LocalDate
 import java.util.concurrent.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -12,7 +13,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 import ru.abrikosov.cleanrate.BuildConfig
@@ -37,7 +38,7 @@ class HistoricalRatesRepository(context: Context) {
         }
 
         try {
-            val fetched = withTimeout(HISTORY_REQUEST_TIMEOUT_MILLIS) {
+            val fetched = withHistoryRequestTimeout(HISTORY_REQUEST_TIMEOUT_MILLIS) {
                 fetchHistory(normalizedBase, normalizedQuote, period)
             }
             saveCached(fetched)
@@ -81,10 +82,12 @@ class HistoricalRatesRepository(context: Context) {
         quoteCode: String,
         period: ChartPeriod,
     ): HistoricalRates = coroutineScope {
-        val latestJson = downloadJson(dateToken = "latest", baseCode = baseCode)
-        val latestPoint = checkNotNull(
-            HistoryRateParser.parsePoint(latestJson, baseCode, quoteCode),
-        ) { "Источник истории вернул некорректный последний курс" }
+        val latestPoint = downloadPoint(
+            dateToken = "latest",
+            baseCode = baseCode,
+            quoteCode = quoteCode,
+            expectedDate = null,
+        )
 
         val dates = HistorySampling.dates(latestPoint.date, period)
         val semaphore = Semaphore(MAX_PARALLEL_REQUESTS)
@@ -116,39 +119,53 @@ class HistoricalRatesRepository(context: Context) {
         )
     }
 
-    private fun fetchPointOrNull(
+    private suspend fun fetchPointOrNull(
         date: LocalDate,
         baseCode: String,
         quoteCode: String,
     ): HistoricalRatePoint? = try {
-        val body = downloadJson(dateToken = date.toString(), baseCode = baseCode)
-        HistoryRateParser.parsePoint(body, baseCode, quoteCode, expectedDate = date)
+        downloadPoint(
+            dateToken = date.toString(),
+            baseCode = baseCode,
+            quoteCode = quoteCode,
+            expectedDate = date,
+        )
     } catch (cancellation: CancellationException) {
         throw cancellation
     } catch (_: Throwable) {
         null
     }
 
-    private fun downloadJson(dateToken: String, baseCode: String): String {
+    private suspend fun downloadPoint(
+        dateToken: String,
+        baseCode: String,
+        quoteCode: String,
+        expectedDate: LocalDate?,
+    ): HistoricalRatePoint {
         val base = baseCode.lowercase()
         val urls = listOf(
             "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@$dateToken/v1/currencies/$base.min.json",
             "https://$dateToken.currency-api.pages.dev/v1/currencies/$base.min.json",
         )
-        var lastError: Throwable? = null
-        urls.forEach { url ->
-            try {
-                return request(url)
-            } catch (cancellation: CancellationException) {
-                throw cancellation
-            } catch (error: Throwable) {
-                lastError = error
+        return firstValidSource(
+            sources = urls,
+            unavailableMessage = "Источник истории недоступен",
+        ) { url ->
+            val body = request(url)
+            checkNotNull(
+                HistoryRateParser.parsePoint(
+                    rawJson = body,
+                    baseCode = baseCode,
+                    quoteCode = quoteCode,
+                    expectedDate = expectedDate,
+                ),
+            ) {
+                "Источник истории вернул некорректный курс"
             }
         }
-        throw lastError ?: IllegalStateException("Источник истории недоступен")
     }
 
-    private fun request(address: String): String {
+    private suspend fun request(address: String): String {
         return HttpsClient.getText(
             address = address,
             accept = "application/json",
@@ -249,3 +266,12 @@ class HistoricalRatesRepository(context: Context) {
         private val CURRENCY_CODE = Regex("[A-Z]{3}")
     }
 }
+
+internal class HistoryRequestTimeoutException : IllegalStateException(
+    "Превышено время загрузки истории курса",
+)
+
+internal suspend fun <T : Any> withHistoryRequestTimeout(
+    timeoutMillis: Long,
+    block: suspend CoroutineScope.() -> T,
+): T = withTimeoutOrNull(timeoutMillis, block) ?: throw HistoryRequestTimeoutException()

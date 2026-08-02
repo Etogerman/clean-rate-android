@@ -5,9 +5,11 @@ import java.io.InputStream
 import java.net.URL
 import java.nio.charset.StandardCharsets
 import javax.net.ssl.HttpsURLConnection
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runInterruptible
 
 internal object HttpsClient {
-    fun getText(
+    suspend fun getText(
         address: String,
         accept: String,
         userAgent: String,
@@ -18,7 +20,17 @@ internal object HttpsClient {
         StandardCharsets.UTF_8,
     )
 
-    fun getBytes(
+    suspend fun getBytes(
+        address: String,
+        accept: String,
+        userAgent: String,
+        maximumBytes: Int,
+        serviceName: String,
+    ): ByteArray = runInterruptible(Dispatchers.IO) {
+        getBytesBlocking(address, accept, userAgent, maximumBytes, serviceName)
+    }
+
+    private fun getBytesBlocking(
         address: String,
         accept: String,
         userAgent: String,

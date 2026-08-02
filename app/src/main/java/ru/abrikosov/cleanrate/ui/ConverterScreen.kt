@@ -360,14 +360,9 @@ private fun RateStatus(
     onSelectSource: () -> Unit,
 ) {
     val uriHandler = LocalUriHandler.current
-    val loadedFromSeed = when (state.rateSource) {
-        RateSource.CBR -> state.cbrSnapshot.loadedFromSeed
-        RateSource.MARKET, RateSource.CUSTOM -> state.marketSnapshot.loadedFromSeed
-    }
-    val isStale = when (state.rateSource) {
-        RateSource.CBR -> state.cbrSnapshot.isStale
-        RateSource.MARKET, RateSource.CUSTOM -> state.marketSnapshot.isStale
-    }
+    val health = RateStatusPolicy.evaluate(state)
+    val loadedFromSeed = health.loadedFromSeed
+    val isStale = health.isStale
     val statusText = when (state.rateSource) {
         RateSource.MARKET -> if (isStale) {
             text.outdatedRate
@@ -387,10 +382,7 @@ private fun RateStatus(
             text.ownRateCount(state.manualRates.size)
         }
     }
-    val lastCheckedEpochSeconds = when (state.rateSource) {
-        RateSource.CBR -> state.cbrSnapshot.lastCheckedEpochSeconds
-        RateSource.MARKET, RateSource.CUSTOM -> state.marketSnapshot.lastCheckedEpochSeconds
-    }
+    val lastCheckedEpochSeconds = health.lastCheckedEpochSeconds
     val detailText = if (isStale) {
         text.refreshRequired
     } else lastCheckedEpochSeconds?.let {
