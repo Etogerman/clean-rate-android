@@ -134,6 +134,14 @@ class UiLocalizationTest {
     }
 
     @Test
+    fun `russian missing history text describes a count rather than a date list`() {
+        assertEquals(
+            "Количество дат без данных: 3; интервалы показаны по календарю",
+            UiText(UiLanguage.RUSSIAN).incompleteHistory(3),
+        )
+    }
+
+    @Test
     fun `special currency names are translated`() {
         assertEquals("Специальные права заимствования", CurrencyCatalog.metadata("XDR", UiLanguage.RUSSIAN).name)
         assertEquals("Special Drawing Rights", CurrencyCatalog.metadata("XDR", UiLanguage.ENGLISH).name)

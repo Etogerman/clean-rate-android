@@ -4,6 +4,7 @@ import java.math.BigDecimal
 import java.time.LocalDate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import ru.abrikosov.cleanrate.data.CbrRateSnapshot
@@ -42,10 +43,27 @@ class RateStatusPolicyTest {
         assertEquals(200L, health.lastCheckedEpochSeconds)
     }
 
+    @Test
+    fun `смешанный статус не выдаёт частичное время за проверку всех источников`() {
+        val health = RateStatusPolicy.evaluate(
+            state(
+                favorites = listOf("USD", "MGA"),
+                marketStale = false,
+                marketFromSeed = true,
+                marketLastCheckedEpochSeconds = null,
+            ),
+        )
+
+        assertFalse(health.isStale)
+        assertTrue(health.loadedFromSeed)
+        assertNull(health.lastCheckedEpochSeconds)
+    }
+
     private fun state(
         favorites: List<String>,
         marketStale: Boolean,
         marketFromSeed: Boolean,
+        marketLastCheckedEpochSeconds: Long? = 100L,
     ): ConverterUiState = ConverterUiState(
         marketSnapshot = RateSnapshot(
             rates = mapOf(
@@ -55,7 +73,7 @@ class RateStatusPolicyTest {
             ),
             rateDate = LocalDate.of(2026, 8, 2),
             loadedFromSeed = marketFromSeed,
-            lastCheckedEpochSeconds = 100L,
+            lastCheckedEpochSeconds = marketLastCheckedEpochSeconds,
             isStale = marketStale,
         ),
         cbrSnapshot = CbrRateSnapshot(

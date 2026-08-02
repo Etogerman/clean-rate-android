@@ -148,7 +148,7 @@ class UiText(val language: UiLanguage) {
         "Historique enregistré affiché",
     )
     fun incompleteHistory(missingCount: Int) = tr(
-        "Нет данных для дат: $missingCount; интервалы показаны по календарю",
+        "Количество дат без данных: $missingCount; интервалы показаны по календарю",
         "Missing dates: $missingCount; spacing follows the calendar",
         "Dates manquantes : $missingCount ; l’espacement suit le calendrier",
     )

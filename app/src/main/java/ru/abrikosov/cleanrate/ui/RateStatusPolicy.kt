@@ -32,6 +32,9 @@ internal object RateStatusPolicy {
     }
 
     private fun merge(vararg sources: RateStatusHealth): RateStatusHealth {
+        // Сводное время относится ко всему набору используемых источников.
+        // Если хотя бы один из них ещё не проверялся, время другого источника
+        // нельзя показывать как время проверки всего набора.
         val checkedTimes = sources.map(RateStatusHealth::lastCheckedEpochSeconds)
         return RateStatusHealth(
             loadedFromSeed = sources.any(RateStatusHealth::loadedFromSeed),
