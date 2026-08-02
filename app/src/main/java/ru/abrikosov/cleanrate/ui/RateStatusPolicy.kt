@@ -21,12 +21,18 @@ internal object RateStatusPolicy {
             lastCheckedEpochSeconds = state.cbrSnapshot.lastCheckedEpochSeconds,
         )
         return when (state.rateSource) {
-            RateSource.MARKET, RateSource.CUSTOM -> market
+            RateSource.MARKET -> market
             RateSource.CBR -> {
                 val usesMarketFallback = state.favorites.any { code ->
                     code !in state.cbrSnapshot.rates
                 }
                 if (usesMarketFallback) merge(cbr, market) else cbr
+            }
+            RateSource.CUSTOM -> {
+                val usesMarketFallback = state.favorites.any { code ->
+                    code != USD_CODE && code !in state.manualRates
+                }
+                if (usesMarketFallback) market else LOCAL_RATES_HEALTH
             }
         }
     }
@@ -45,4 +51,11 @@ internal object RateStatusPolicy {
                 ?.minOrNull(),
         )
     }
+
+    private val LOCAL_RATES_HEALTH = RateStatusHealth(
+        loadedFromSeed = false,
+        isStale = false,
+        lastCheckedEpochSeconds = null,
+    )
+    private const val USD_CODE = "USD"
 }

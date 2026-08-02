@@ -37,7 +37,28 @@ data class HistorySelection(
     val baseCode: String,
     val quoteCode: String,
     val period: ChartPeriod,
+    val amountText: String? = null,
 )
+
+internal const val MAX_HISTORY_AMOUNT_LENGTH = 24
+
+internal fun filterHistoryAmountText(rawValue: String): String = buildString {
+    var hasSeparator = false
+    rawValue.forEach { character ->
+        when {
+            character.isDigit() -> append(character)
+            character in charArrayOf(',', '.') && !hasSeparator -> {
+                if (isEmpty()) append('0')
+                append(character)
+                hasSeparator = true
+            }
+        }
+    }
+}.take(MAX_HISTORY_AMOUNT_LENGTH)
+
+internal fun validatedHistoryAmountText(value: String?): String? = value?.takeIf {
+    filterHistoryAmountText(it) == it
+}
 
 object HistorySampling {
     fun dates(endDate: LocalDate, period: ChartPeriod): List<LocalDate> {

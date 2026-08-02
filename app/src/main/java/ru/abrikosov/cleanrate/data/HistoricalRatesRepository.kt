@@ -66,14 +66,37 @@ class HistoricalRatesRepository(context: Context) {
         val period = runCatching {
             ChartPeriod.valueOf(preferences.getString(KEY_SELECTED_PERIOD, null) ?: ChartPeriod.MONTH.name)
         }.getOrDefault(ChartPeriod.MONTH)
-        return HistorySelection(baseCode = base, quoteCode = quote, period = period)
+        val amountText = validatedHistoryAmountText(
+            preferences.getString(KEY_SELECTED_AMOUNT, null),
+        )
+        return HistorySelection(
+            baseCode = base,
+            quoteCode = quote,
+            period = period,
+            amountText = amountText,
+        )
     }
 
-    fun saveSelection(baseCode: String, quoteCode: String, period: ChartPeriod) {
+    fun saveSelection(
+        baseCode: String,
+        quoteCode: String,
+        period: ChartPeriod,
+        amountText: String?,
+    ) {
         preferences.edit {
             putString(KEY_SELECTED_BASE, baseCode)
             putString(KEY_SELECTED_QUOTE, quoteCode)
             putString(KEY_SELECTED_PERIOD, period.name)
+            if (amountText == null) {
+                remove(KEY_SELECTED_AMOUNT)
+            } else {
+                val validatedAmount = validatedHistoryAmountText(amountText)
+                if (validatedAmount == null) {
+                    remove(KEY_SELECTED_AMOUNT)
+                } else {
+                    putString(KEY_SELECTED_AMOUNT, validatedAmount)
+                }
+            }
         }
     }
 
@@ -158,6 +181,7 @@ class HistoricalRatesRepository(context: Context) {
                     baseCode = baseCode,
                     quoteCode = quoteCode,
                     expectedDate = expectedDate,
+                    requireFresh = expectedDate == null,
                 ),
             ) {
                 "Источник истории вернул некорректный курс"
@@ -257,6 +281,7 @@ class HistoricalRatesRepository(context: Context) {
         private const val KEY_SELECTED_BASE = "selected_base"
         private const val KEY_SELECTED_QUOTE = "selected_quote"
         private const val KEY_SELECTED_PERIOD = "selected_period"
+        private const val KEY_SELECTED_AMOUNT = "selected_amount"
         private const val CACHE_KEY_PREFIX = "history_"
         private const val MAX_PARALLEL_REQUESTS = 6
         private const val MAX_CACHE_ENTRIES = 24

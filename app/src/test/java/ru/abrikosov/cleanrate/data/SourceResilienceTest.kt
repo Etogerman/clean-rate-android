@@ -1,5 +1,6 @@
 package ru.abrikosov.cleanrate.data
 
+import java.time.LocalDate
 import java.util.concurrent.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -25,6 +26,32 @@ class SourceResilienceTest {
 
         assertEquals(listOf("primary", "fallback"), attempted)
         assertEquals("проверенный результат", result)
+    }
+
+    @Test
+    fun `резервный latest используется после устаревшего основного ответа`() = runBlocking {
+        val today = LocalDate.of(2026, 8, 2)
+        val attempted = mutableListOf<String>()
+
+        val point = firstValidSource(
+            sources = listOf("primary", "fallback"),
+            unavailableMessage = "нет источников",
+        ) { source ->
+            attempted += source
+            val date = if (source == "primary") "2026-07-20" else "2026-08-02"
+            checkNotNull(
+                HistoryRateParser.parsePoint(
+                    rawJson = """{"date":"$date","rub":{"mga":53.9}}""",
+                    baseCode = "RUB",
+                    quoteCode = "MGA",
+                    requireFresh = true,
+                    today = today,
+                ),
+            )
+        }
+
+        assertEquals(listOf("primary", "fallback"), attempted)
+        assertEquals(today, point.date)
     }
 
     @Test

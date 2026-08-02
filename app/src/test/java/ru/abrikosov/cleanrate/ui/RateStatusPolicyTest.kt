@@ -59,11 +59,47 @@ class RateStatusPolicyTest {
         assertNull(health.lastCheckedEpochSeconds)
     }
 
+    @Test
+    fun `полностью ручные избранные курсы не зависят от мирового снимка`() {
+        val health = RateStatusPolicy.evaluate(
+            state(
+                favorites = listOf("USD", "RUB"),
+                marketStale = true,
+                marketFromSeed = true,
+                rateSource = RateSource.CUSTOM,
+                manualRates = mapOf("RUB" to BigDecimal("90")),
+            ),
+        )
+
+        assertFalse(health.isStale)
+        assertFalse(health.loadedFromSeed)
+        assertNull(health.lastCheckedEpochSeconds)
+    }
+
+    @Test
+    fun `частично ручные курсы учитывают мировой резерв`() {
+        val health = RateStatusPolicy.evaluate(
+            state(
+                favorites = listOf("USD", "RUB", "MGA"),
+                marketStale = true,
+                marketFromSeed = true,
+                rateSource = RateSource.CUSTOM,
+                manualRates = mapOf("RUB" to BigDecimal("90")),
+            ),
+        )
+
+        assertTrue(health.isStale)
+        assertTrue(health.loadedFromSeed)
+        assertEquals(100L, health.lastCheckedEpochSeconds)
+    }
+
     private fun state(
         favorites: List<String>,
         marketStale: Boolean,
         marketFromSeed: Boolean,
         marketLastCheckedEpochSeconds: Long? = 100L,
+        rateSource: RateSource = RateSource.CBR,
+        manualRates: Map<String, BigDecimal> = emptyMap(),
     ): ConverterUiState = ConverterUiState(
         marketSnapshot = RateSnapshot(
             rates = mapOf(
@@ -86,10 +122,10 @@ class RateStatusPolicyTest {
             lastCheckedEpochSeconds = 200L,
             isStale = false,
         ),
-        rateSource = RateSource.CBR,
+        rateSource = rateSource,
         uiLanguage = UiLanguage.RUSSIAN,
         favorites = favorites,
-        manualRates = emptyMap(),
+        manualRates = manualRates,
         keySoundEnabled = true,
         keyVibrationEnabled = true,
     )

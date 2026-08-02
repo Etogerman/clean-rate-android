@@ -70,6 +70,7 @@ class ConverterViewModel(application: Application) : AndroidViewModel(applicatio
     private val restoredSession = marketRepository.loadConverterSession()?.takeIf {
         it.activeCode in initialFavorites && it.activeCode in initialMarketSnapshot.rates
     }
+    private val refreshCoordinator = RefreshCoordinator()
 
     private val _uiState = MutableStateFlow(
         ConverterUiState(
@@ -95,13 +96,24 @@ class ConverterViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun refreshRates(showSuccessMessage: Boolean = true, force: Boolean = true) {
-        val state = _uiState.value
-        if (state.isRefreshing) return
+        val request = refreshCoordinator.submit(
+            RefreshRequest(
+                showSuccessMessage = showSuccessMessage,
+                force = force,
+            ),
+        ) ?: return
+        startRefresh(request)
+    }
 
-        val refreshMarket = force || marketRepository.shouldRefresh(state.marketSnapshot)
+    private fun startRefresh(request: RefreshRequest) {
+        val state = _uiState.value
+        val refreshMarket = request.force || marketRepository.shouldRefresh(state.marketSnapshot)
         val refreshCbr = state.rateSource == RateSource.CBR &&
-            (force || cbrRepository.shouldRefresh(state.cbrSnapshot))
-        if (!refreshMarket && !refreshCbr) return
+            (request.force || cbrRepository.shouldRefresh(state.cbrSnapshot))
+        if (!refreshMarket && !refreshCbr) {
+            continueWithPendingRefresh()
+            return
+        }
 
         _uiState.update { it.copy(isRefreshing = true) }
         viewModelScope.launch {
@@ -123,12 +135,17 @@ class ConverterViewModel(application: Application) : AndroidViewModel(applicatio
                     isRefreshing = false,
                     message = when {
                         hasFailure -> UiMessage.SourcesUnavailable
-                        showSuccessMessage -> UiMessage.RatesUpdated
+                        request.showSuccessMessage -> UiMessage.RatesUpdated
                         else -> null
                     },
                 )
             }
+            continueWithPendingRefresh()
         }
+    }
+
+    private fun continueWithPendingRefresh() {
+        refreshCoordinator.complete()?.let(::startRefresh)
     }
 
     fun selectRateSource(source: RateSource) {
