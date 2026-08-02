@@ -1,0 +1,19 @@
+.gradle/
+local.properties
+**/build/
+*.iml
+.idea/
+captures/
+.DS_Store
+
+# Подпись и готовые пакеты никогда не хранятся в Git.
+signing/
+*.jks
+*.keystore
+*.idsig
+*.apk
+*.aab
+
+# Внутренние отчёты содержат локальные пути и не относятся к исходному коду.
+design-qa.md
+release/
