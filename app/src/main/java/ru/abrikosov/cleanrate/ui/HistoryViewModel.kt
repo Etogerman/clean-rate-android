@@ -24,6 +24,7 @@ data class HistoryUiState(
     val isLoading: Boolean = false,
     val loadedFromCache: Boolean = false,
     val isStale: Boolean = false,
+    val missingPointCount: Int = 0,
     val hasError: Boolean = false,
     val initialized: Boolean = false,
 ) {
@@ -93,6 +94,7 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
                 hasError = false,
                 loadedFromCache = false,
                 isStale = false,
+                missingPointCount = 0,
             )
         }
         saveSelection()
@@ -130,6 +132,7 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
                 hasError = false,
                 loadedFromCache = false,
                 isStale = false,
+                missingPointCount = 0,
             )
         }
         saveSelection()
@@ -169,6 +172,7 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
                                 isLoading = false,
                                 loadedFromCache = history.loadedFromCache,
                                 isStale = history.isStale,
+                                missingPointCount = history.missingPointCount,
                                 hasError = false,
                             )
                         },

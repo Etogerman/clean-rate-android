@@ -25,9 +25,13 @@ data class HistoricalRates(
     val period: ChartPeriod,
     val points: List<HistoricalRatePoint>,
     val savedAtEpochMillis: Long,
+    val requestedPointCount: Int = points.size,
     val loadedFromCache: Boolean = false,
     val isStale: Boolean = false,
-)
+) {
+    val missingPointCount: Int
+        get() = (requestedPointCount - points.size).coerceAtLeast(0)
+}
 
 data class HistorySelection(
     val baseCode: String,

@@ -2,11 +2,8 @@ package ru.abrikosov.cleanrate.data
 
 import android.content.Context
 import android.util.Log
-import java.io.ByteArrayOutputStream
+import androidx.core.content.edit
 import java.math.BigDecimal
-import java.net.HttpURLConnection
-import java.net.URL
-import java.nio.charset.StandardCharsets
 import java.util.concurrent.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -44,7 +41,7 @@ class CurrencyRepository(private val context: Context) {
     }
 
     suspend fun refreshRates(): Result<RateSnapshot> = withContext(Dispatchers.IO) {
-        preferences.edit().putLong(KEY_LAST_ATTEMPT, System.currentTimeMillis()).apply()
+        preferences.edit { putLong(KEY_LAST_ATTEMPT, System.currentTimeMillis()) }
         try {
             val body = downloadRates()
             val checkedAtMillis = System.currentTimeMillis()
@@ -53,14 +50,15 @@ class CurrencyRepository(private val context: Context) {
                     rawJson = body,
                     loadedFromSeed = false,
                     lastCheckedEpochSeconds = checkedAtMillis / 1_000L,
+                    requireFresh = true,
                 ),
             ) {
                 "Сервис вернул некорректные данные"
             }
-            preferences.edit()
-                .putString(KEY_RATE_JSON, body)
-                .putLong(KEY_LAST_SUCCESS, checkedAtMillis)
-                .apply()
+            preferences.edit {
+                putString(KEY_RATE_JSON, body)
+                putLong(KEY_LAST_SUCCESS, checkedAtMillis)
+            }
             Result.success(snapshot)
         } catch (cancellation: CancellationException) {
             throw cancellation
@@ -76,7 +74,12 @@ class CurrencyRepository(private val context: Context) {
         val lastSuccess = preferences.getLong(KEY_LAST_SUCCESS, 0L)
         val enoughTimeSinceAttempt = now - lastAttempt > RETRY_INTERVAL_MILLIS
         return enoughTimeSinceAttempt &&
-            (snapshot.loadedFromSeed || lastSuccess == 0L || now - lastSuccess > REFRESH_INTERVAL_MILLIS)
+            (
+                snapshot.loadedFromSeed ||
+                    snapshot.isStale ||
+                    lastSuccess == 0L ||
+                    now - lastSuccess > REFRESH_INTERVAL_MILLIS
+                )
     }
 
     fun loadFavorites(): List<String> {
@@ -90,7 +93,7 @@ class CurrencyRepository(private val context: Context) {
     }
 
     fun saveFavorites(codes: List<String>) {
-        preferences.edit().putString(KEY_FAVORITES, codes.joinToString(",")).apply()
+        preferences.edit { putString(KEY_FAVORITES, codes.joinToString(",")) }
     }
 
     fun loadManualRates(): Map<String, BigDecimal> {
@@ -109,7 +112,7 @@ class CurrencyRepository(private val context: Context) {
     fun saveManualRates(rates: Map<String, BigDecimal>) {
         val json = JSONObject()
         rates.forEach { (code, rate) -> json.put(code, rate.toPlainString()) }
-        preferences.edit().putString(KEY_MANUAL_RATES, json.toString()).apply()
+        preferences.edit { putString(KEY_MANUAL_RATES, json.toString()) }
     }
 
     fun loadRateSource(): RateSource = runCatching {
@@ -117,7 +120,7 @@ class CurrencyRepository(private val context: Context) {
     }.getOrDefault(RateSource.MARKET)
 
     fun saveRateSource(source: RateSource) {
-        preferences.edit().putString(KEY_RATE_SOURCE, source.name).apply()
+        preferences.edit { putString(KEY_RATE_SOURCE, source.name) }
     }
 
     fun loadUiLanguage(): UiLanguage = runCatching {
@@ -125,19 +128,19 @@ class CurrencyRepository(private val context: Context) {
     }.getOrDefault(UiLanguage.RUSSIAN)
 
     fun saveUiLanguage(language: UiLanguage) {
-        preferences.edit().putString(KEY_UI_LANGUAGE, language.name).apply()
+        preferences.edit { putString(KEY_UI_LANGUAGE, language.name) }
     }
 
     fun loadKeySoundEnabled(): Boolean = preferences.getBoolean(KEY_KEY_SOUND_ENABLED, true)
 
     fun saveKeySoundEnabled(enabled: Boolean) {
-        preferences.edit().putBoolean(KEY_KEY_SOUND_ENABLED, enabled).apply()
+        preferences.edit { putBoolean(KEY_KEY_SOUND_ENABLED, enabled) }
     }
 
     fun loadKeyVibrationEnabled(): Boolean = preferences.getBoolean(KEY_KEY_VIBRATION_ENABLED, true)
 
     fun saveKeyVibrationEnabled(enabled: Boolean) {
-        preferences.edit().putBoolean(KEY_KEY_VIBRATION_ENABLED, enabled).apply()
+        preferences.edit { putBoolean(KEY_KEY_VIBRATION_ENABLED, enabled) }
     }
 
     fun loadConverterSession(): ConverterSession? = parseConverterSession(
@@ -153,12 +156,12 @@ class CurrencyRepository(private val context: Context) {
         amount: BigDecimal,
         justEvaluated: Boolean,
     ) {
-        preferences.edit()
-            .putString(KEY_ACTIVE_CODE, activeCode)
-            .putString(KEY_LAST_EXPRESSION, expression)
-            .putString(KEY_LAST_AMOUNT, amount.toPlainString())
-            .putBoolean(KEY_JUST_EVALUATED, justEvaluated)
-            .apply()
+        preferences.edit {
+            putString(KEY_ACTIVE_CODE, activeCode)
+            putString(KEY_LAST_EXPRESSION, expression)
+            putString(KEY_LAST_AMOUNT, amount.toPlainString())
+            putBoolean(KEY_JUST_EVALUATED, justEvaluated)
+        }
     }
 
     private fun downloadRates(): String {
@@ -176,34 +179,13 @@ class CurrencyRepository(private val context: Context) {
     }
 
     private fun request(address: String): String {
-        val connection = (URL(address).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = 10_000
-            readTimeout = 15_000
-            instanceFollowRedirects = true
-            setRequestProperty("Accept", "application/json")
-            setRequestProperty("User-Agent", "CleanRate/${BuildConfig.VERSION_NAME} Android")
-        }
-        try {
-            check(connection.responseCode in 200..299) {
-                "Сервис курсов ответил кодом ${connection.responseCode}"
-            }
-            val output = ByteArrayOutputStream()
-            connection.inputStream.use { input ->
-                val buffer = ByteArray(8_192)
-                var total = 0
-                while (true) {
-                    val read = input.read(buffer)
-                    if (read < 0) break
-                    total += read
-                    check(total <= MAX_RESPONSE_BYTES) { "Ответ сервиса курсов слишком большой" }
-                    output.write(buffer, 0, read)
-                }
-            }
-            return output.toString(StandardCharsets.UTF_8.name())
-        } finally {
-            connection.disconnect()
-        }
+        return HttpsClient.getText(
+            address = address,
+            accept = "application/json",
+            userAgent = "CleanRate/${BuildConfig.VERSION_NAME} Android",
+            maximumBytes = MAX_RESPONSE_BYTES,
+            serviceName = "Сервис курсов",
+        )
     }
 
     companion object {

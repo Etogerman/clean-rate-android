@@ -10,6 +10,8 @@ internal object MarketRateParser {
         rawJson: String,
         loadedFromSeed: Boolean,
         lastCheckedEpochSeconds: Long?,
+        requireFresh: Boolean = false,
+        today: LocalDate = LocalDate.now(),
     ): RateSnapshot? = runCatching {
         val root = JSONObject(rawJson)
         val rateDate = LocalDate.parse(root.getString("date"))
@@ -28,11 +30,14 @@ internal object MarketRateParser {
         }
         check(rates.size > 100) { "Источник вернул слишком мало поддерживаемых валют" }
         check(REQUIRED_CODES.all(rates::containsKey)) { "В ответе нет основных валют" }
+        val isStale = !RateFreshnessPolicy.isMarketFresh(rateDate, today)
+        check(!requireFresh || !isStale) { "Источник вернул неактуальную дату курса" }
         RateSnapshot(
             rates = rates,
             rateDate = rateDate,
             loadedFromSeed = loadedFromSeed,
             lastCheckedEpochSeconds = lastCheckedEpochSeconds,
+            isStale = isStale,
         )
     }.getOrNull()
 

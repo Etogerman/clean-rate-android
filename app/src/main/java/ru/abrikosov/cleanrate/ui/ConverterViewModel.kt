@@ -5,6 +5,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import java.math.BigDecimal
 import java.math.RoundingMode
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -101,8 +103,15 @@ class ConverterViewModel(application: Application) : AndroidViewModel(applicatio
 
         _uiState.update { it.copy(isRefreshing = true) }
         viewModelScope.launch {
-            val marketResult = if (refreshMarket) marketRepository.refreshRates() else null
-            val cbrResult = if (refreshCbr) cbrRepository.refreshRates() else null
+            val (marketResult, cbrResult) = coroutineScope {
+                val marketDeferred = async {
+                    if (refreshMarket) marketRepository.refreshRates() else null
+                }
+                val cbrDeferred = async {
+                    if (refreshCbr) cbrRepository.refreshRates() else null
+                }
+                marketDeferred.await() to cbrDeferred.await()
+            }
             val hasFailure = marketResult?.isFailure == true || cbrResult?.isFailure == true
 
             _uiState.update { current ->

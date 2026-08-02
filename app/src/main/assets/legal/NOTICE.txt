@@ -1,0 +1,18 @@
+Clean Rate / «Чистый курс»
+
+Application source code: Apache License 2.0
+https://www.apache.org/licenses/LICENSE-2.0
+
+AndroidX, Jetpack Compose, Kotlin and kotlinx.coroutines:
+Apache License 2.0
+
+exchange-api / currency-api data: CC0 1.0
+https://github.com/fawazahmed0/exchange-api
+
+Bank of Russia public daily reference rates:
+https://www.cbr.ru/currency_base/daily/
+
+The bundled key click is an original locally synthesized sound distributed
+under the application's Apache License 2.0.
+
+Full notices: https://github.com/Etogerman/clean-rate-android/blob/main/THIRD_PARTY.md

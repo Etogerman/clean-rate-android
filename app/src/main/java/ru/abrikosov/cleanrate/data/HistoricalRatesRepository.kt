@@ -2,10 +2,7 @@ package ru.abrikosov.cleanrate.data
 
 import android.content.Context
 import android.util.Log
-import java.io.ByteArrayOutputStream
-import java.net.HttpURLConnection
-import java.net.URL
-import java.nio.charset.StandardCharsets
+import androidx.core.content.edit
 import java.time.LocalDate
 import java.util.concurrent.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -15,6 +12,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import org.json.JSONArray
 import org.json.JSONObject
 import ru.abrikosov.cleanrate.BuildConfig
@@ -39,7 +37,9 @@ class HistoricalRatesRepository(context: Context) {
         }
 
         try {
-            val fetched = fetchHistory(normalizedBase, normalizedQuote, period)
+            val fetched = withTimeout(HISTORY_REQUEST_TIMEOUT_MILLIS) {
+                fetchHistory(normalizedBase, normalizedQuote, period)
+            }
             saveCached(fetched)
             Result.success(fetched)
         } catch (cancellation: CancellationException) {
@@ -69,11 +69,11 @@ class HistoricalRatesRepository(context: Context) {
     }
 
     fun saveSelection(baseCode: String, quoteCode: String, period: ChartPeriod) {
-        preferences.edit()
-            .putString(KEY_SELECTED_BASE, baseCode)
-            .putString(KEY_SELECTED_QUOTE, quoteCode)
-            .putString(KEY_SELECTED_PERIOD, period.name)
-            .apply()
+        preferences.edit {
+            putString(KEY_SELECTED_BASE, baseCode)
+            putString(KEY_SELECTED_QUOTE, quoteCode)
+            putString(KEY_SELECTED_PERIOD, period.name)
+        }
     }
 
     private suspend fun fetchHistory(
@@ -112,6 +112,7 @@ class HistoricalRatesRepository(context: Context) {
             period = period,
             points = points,
             savedAtEpochMillis = System.currentTimeMillis(),
+            requestedPointCount = dates.size,
         )
     }
 
@@ -148,34 +149,13 @@ class HistoricalRatesRepository(context: Context) {
     }
 
     private fun request(address: String): String {
-        val connection = (URL(address).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = 10_000
-            readTimeout = 15_000
-            instanceFollowRedirects = true
-            setRequestProperty("Accept", "application/json")
-            setRequestProperty("User-Agent", "CleanRate/${BuildConfig.VERSION_NAME} Android")
-        }
-        try {
-            check(connection.responseCode in 200..299) {
-                "Источник истории ответил кодом ${connection.responseCode}"
-            }
-            val output = ByteArrayOutputStream()
-            connection.inputStream.use { input ->
-                val buffer = ByteArray(8_192)
-                var total = 0
-                while (true) {
-                    val read = input.read(buffer)
-                    if (read < 0) break
-                    total += read
-                    check(total <= MAX_RESPONSE_BYTES) { "Ответ источника истории слишком большой" }
-                    output.write(buffer, 0, read)
-                }
-            }
-            return output.toString(StandardCharsets.UTF_8.name())
-        } finally {
-            connection.disconnect()
-        }
+        return HttpsClient.getText(
+            address = address,
+            accept = "application/json",
+            userAgent = "CleanRate/${BuildConfig.VERSION_NAME} Android",
+            maximumBytes = MAX_RESPONSE_BYTES,
+            serviceName = "Источник истории",
+        )
     }
 
     private fun loadCached(
@@ -205,6 +185,8 @@ class HistoricalRatesRepository(context: Context) {
                 period = period,
                 points = points,
                 savedAtEpochMillis = root.getLong("savedAt"),
+                requestedPointCount = root.optInt("requestedPointCount", points.size)
+                    .coerceAtLeast(points.size),
                 loadedFromCache = true,
             )
         }.getOrNull()
@@ -224,17 +206,32 @@ class HistoricalRatesRepository(context: Context) {
             .put("quote", history.quoteCode)
             .put("period", history.period.name)
             .put("savedAt", history.savedAtEpochMillis)
+            .put("requestedPointCount", history.requestedPointCount)
             .put("points", points)
-        preferences.edit()
-            .putString(cacheKey(history.baseCode, history.quoteCode, history.period), root.toString())
-            .apply()
+        val key = cacheKey(history.baseCode, history.quoteCode, history.period)
+        val savedAtByKey = preferences.all.keys
+            .asSequence()
+            .filter { it.startsWith(CACHE_KEY_PREFIX) }
+            .associateWith { cachedKey ->
+                preferences.getString(cachedKey, null)
+                    ?.let { raw -> runCatching { JSONObject(raw).optLong("savedAt", 0L) }.getOrDefault(0L) }
+                    ?: 0L
+            }
+            .toMutableMap()
+            .apply { this[key] = history.savedAtEpochMillis }
+        preferences.edit {
+            putString(key, root.toString())
+            HistoryCachePolicy.keysToEvict(savedAtByKey, MAX_CACHE_ENTRIES).forEach { cachedKey ->
+                remove(cachedKey)
+            }
+        }
     }
 
     private fun isFresh(history: HistoricalRates): Boolean =
         System.currentTimeMillis() - history.savedAtEpochMillis <= CACHE_FRESH_MILLIS
 
     private fun cacheKey(baseCode: String, quoteCode: String, period: ChartPeriod): String =
-        "history_${baseCode}_${quoteCode}_${period.name}"
+        "${CACHE_KEY_PREFIX}${baseCode}_${quoteCode}_${period.name}"
 
     companion object {
         const val ATTRIBUTION_URL = "https://github.com/fawazahmed0/exchange-api"
@@ -243,8 +240,11 @@ class HistoricalRatesRepository(context: Context) {
         private const val KEY_SELECTED_BASE = "selected_base"
         private const val KEY_SELECTED_QUOTE = "selected_quote"
         private const val KEY_SELECTED_PERIOD = "selected_period"
+        private const val CACHE_KEY_PREFIX = "history_"
         private const val MAX_PARALLEL_REQUESTS = 6
+        private const val MAX_CACHE_ENTRIES = 24
         private const val MAX_RESPONSE_BYTES = 64 * 1_024
+        private const val HISTORY_REQUEST_TIMEOUT_MILLIS = 60_000L
         private const val CACHE_FRESH_MILLIS = 20 * 60 * 60 * 1_000L
         private val CURRENCY_CODE = Regex("[A-Z]{3}")
     }

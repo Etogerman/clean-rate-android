@@ -71,6 +71,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -85,7 +88,6 @@ import androidx.compose.ui.unit.sp
 import java.math.BigDecimal
 import kotlin.math.abs
 import kotlin.math.max
-import kotlin.math.roundToInt
 import ru.abrikosov.cleanrate.data.ChartPeriod
 import ru.abrikosov.cleanrate.data.CurrencyCatalog
 import ru.abrikosov.cleanrate.data.CurrencyMetadata
@@ -481,6 +483,9 @@ private fun HistoryChartCard(
                             state.points.size,
                         ),
                         selectedIndex = selectedIndex,
+                        selectPointLabel = text.selectChartPoint,
+                        previousPointLabel = text.previousChartPoint,
+                        nextPointLabel = text.nextChartPoint,
                         onPointTapped = onPointTapped,
                         onPointDragged = onPointDragged,
                         modifier = Modifier
@@ -489,6 +494,13 @@ private fun HistoryChartCard(
                     )
                     if (state.isLoading) {
                         LinearProgressIndicator(Modifier.fillMaxWidth())
+                    }
+                    if (state.missingPointCount > 0) {
+                        Text(
+                            text.incompleteHistory(state.missingPointCount),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
                 state.isLoading || !state.initialized -> {
@@ -598,6 +610,9 @@ private fun RateLineChart(
     language: UiLanguage,
     contentDescription: String,
     selectedIndex: Int?,
+    selectPointLabel: String,
+    previousPointLabel: String,
+    nextPointLabel: String,
     onPointTapped: (Int) -> Unit,
     onPointDragged: (Int) -> Unit,
     modifier: Modifier = Modifier,
@@ -612,23 +627,52 @@ private fun RateLineChart(
     val currentOnPointDragged by rememberUpdatedState(onPointDragged)
 
     val interactiveModifier = modifier
-        .semantics { this.contentDescription = contentDescription }
-        .pointerInput(points.size) {
+        .semantics {
+            this.contentDescription = contentDescription
+            onClick(label = selectPointLabel) {
+                if (points.isEmpty()) {
+                    false
+                } else {
+                    currentOnPointDragged(selectedIndex ?: points.lastIndex)
+                    true
+                }
+            }
+            customActions = buildList {
+                val currentIndex = selectedIndex ?: points.lastIndex
+                if (currentIndex > 0) {
+                    add(
+                        CustomAccessibilityAction(previousPointLabel) {
+                            currentOnPointDragged(currentIndex - 1)
+                            true
+                        },
+                    )
+                }
+                if (currentIndex in 0 until points.lastIndex) {
+                    add(
+                        CustomAccessibilityAction(nextPointLabel) {
+                            currentOnPointDragged(currentIndex + 1)
+                            true
+                        },
+                    )
+                }
+            }
+        }
+        .pointerInput(points) {
             detectTapGestures { offset ->
                 val index = ChartPointSelection.nearestIndex(
                     positionX = offset.x,
-                    pointCount = points.size,
+                    points = points,
                     chartLeft = 52.dp.toPx(),
                     chartRight = size.width - 8.dp.toPx(),
                 )
                 if (index >= 0) currentOnPointTapped(index)
             }
         }
-        .pointerInput(points.size) {
+        .pointerInput(points) {
             fun selectAt(positionX: Float) {
                 val index = ChartPointSelection.nearestIndex(
                     positionX = positionX,
-                    pointCount = points.size,
+                    points = points,
                     chartLeft = 52.dp.toPx(),
                     chartRight = size.width - 8.dp.toPx(),
                 )
@@ -691,7 +735,7 @@ private fun RateLineChart(
 
         val path = Path()
         points.forEachIndexed { index, point ->
-            val x = left + chartWidth * index / points.lastIndex.toFloat()
+            val x = left + chartWidth * ChartPointSelection.fractionForIndex(points, index)
             val normalized = ((point.rate.toDouble() - minimum) / range).toFloat()
             val y = bottom - chartHeight * normalized
             if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
@@ -712,7 +756,7 @@ private fun RateLineChart(
         } else {
             val safeIndex = selectedIndex.coerceIn(points.indices)
             val selectedPoint = points[safeIndex]
-            val selectedX = left + chartWidth * safeIndex / points.lastIndex.toFloat()
+            val selectedX = left + chartWidth * ChartPointSelection.fractionForIndex(points, safeIndex)
             val selectedY = bottom -
                 chartHeight * ((selectedPoint.rate.toDouble() - minimum) / range).toFloat()
             drawLine(
@@ -730,8 +774,9 @@ private fun RateLineChart(
             textSize = labelTextSize
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
         }
-        listOf(0, points.lastIndex / 2, points.lastIndex).distinct().forEach { index ->
-            val x = left + chartWidth * index / points.lastIndex.toFloat()
+        val middleIndex = ChartPointSelection.middleIndex(points)
+        listOf(0, middleIndex, points.lastIndex).distinct().forEach { index ->
+            val x = left + chartWidth * ChartPointSelection.fractionForIndex(points, index)
             datePaint.textAlign = when (index) {
                 0 -> AndroidPaint.Align.LEFT
                 points.lastIndex -> AndroidPaint.Align.RIGHT
@@ -750,15 +795,40 @@ private fun RateLineChart(
 internal object ChartPointSelection {
     fun nearestIndex(
         positionX: Float,
-        pointCount: Int,
+        points: List<HistoricalRatePoint>,
         chartLeft: Float,
         chartRight: Float,
     ): Int {
-        if (pointCount <= 0) return -1
-        if (pointCount == 1) return 0
+        if (points.isEmpty()) return -1
+        if (points.size == 1) return 0
         val chartWidth = max(chartRight - chartLeft, 1f)
         val fraction = ((positionX - chartLeft) / chartWidth).coerceIn(0f, 1f)
-        return (fraction * (pointCount - 1)).roundToInt().coerceIn(0, pointCount - 1)
+        val firstDay = points.first().date.toEpochDay().toDouble()
+        val lastDay = points.last().date.toEpochDay().toDouble()
+        if (lastDay <= firstDay) return 0
+        val targetDay = firstDay + (lastDay - firstDay) * fraction
+        return points.indices.minByOrNull { index ->
+            abs(points[index].date.toEpochDay() - targetDay)
+        } ?: -1
+    }
+
+    fun fractionForIndex(points: List<HistoricalRatePoint>, index: Int): Float {
+        if (points.size <= 1) return 0f
+        val firstDay = points.first().date.toEpochDay()
+        val lastDay = points.last().date.toEpochDay()
+        if (lastDay <= firstDay) return 0f
+        val day = points[index.coerceIn(points.indices)].date.toEpochDay()
+        return ((day - firstDay).toDouble() / (lastDay - firstDay).toDouble()).toFloat()
+    }
+
+    fun middleIndex(points: List<HistoricalRatePoint>): Int {
+        if (points.isEmpty()) return -1
+        val firstDay = points.first().date.toEpochDay().toDouble()
+        val lastDay = points.last().date.toEpochDay().toDouble()
+        val middleDay = firstDay + (lastDay - firstDay) / 2.0
+        return points.indices.minByOrNull { index ->
+            abs(points[index].date.toEpochDay() - middleDay)
+        } ?: 0
     }
 }
 
