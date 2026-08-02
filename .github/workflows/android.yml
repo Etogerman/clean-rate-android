@@ -113,15 +113,10 @@ jobs:
           arch: x86_64
           target: default
           disable-animations: true
-          script: |
-            set +e
-            ./gradlew --no-daemon connectedDebugAndroidTest
-            android_test_status=$?
-            if [ "$android_test_status" -ne 0 ]; then
-              echo "Инструментальные тесты завершились ошибкой. Последние строки logcat:"
-              adb logcat -d -v threadtime | tail -n 4000
-            fi
-            exit "$android_test_status"
+          script: >-
+            ./gradlew --no-daemon connectedDebugAndroidTest ||
+            { android_test_status=$?; echo "Инструментальные тесты завершились ошибкой. Последние строки logcat:";
+            adb logcat -d -v threadtime | tail -n 4000; exit "$android_test_status"; }
 
       - name: Сохранить отчёт инструментальных тестов
         if: always()
