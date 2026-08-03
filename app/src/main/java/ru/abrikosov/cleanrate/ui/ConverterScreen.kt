@@ -360,28 +360,32 @@ private fun RateStatus(
     onSelectSource: () -> Unit,
 ) {
     val uriHandler = LocalUriHandler.current
-    val loadedFromSeed = when (state.rateSource) {
-        RateSource.CBR -> state.cbrSnapshot.loadedFromSeed
-        RateSource.MARKET, RateSource.CUSTOM -> state.marketSnapshot.loadedFromSeed
-    }
+    val health = RateStatusPolicy.evaluate(state)
+    val loadedFromSeed = health.loadedFromSeed
+    val isStale = health.isStale
     val statusText = when (state.rateSource) {
-        RateSource.MARKET -> if (state.marketSnapshot.loadedFromSeed) {
+        RateSource.MARKET -> if (isStale) {
+            text.outdatedRate
+        } else if (state.marketSnapshot.loadedFromSeed) {
             text.savedMarketRate
         } else {
             text.rateFor(ValueFormatter.date(state.marketSnapshot.rateDate, state.uiLanguage))
         }
-        RateSource.CBR -> text.cbrRateFor(ValueFormatter.date(state.cbrSnapshot.officialDate, state.uiLanguage))
+        RateSource.CBR -> if (isStale) {
+            text.outdatedRate
+        } else {
+            text.cbrRateFor(ValueFormatter.date(state.cbrSnapshot.officialDate, state.uiLanguage))
+        }
         RateSource.CUSTOM -> if (state.manualRates.isEmpty()) {
             text.bankRatesNotSet
         } else {
             text.ownRateCount(state.manualRates.size)
         }
     }
-    val lastCheckedEpochSeconds = when (state.rateSource) {
-        RateSource.CBR -> state.cbrSnapshot.lastCheckedEpochSeconds
-        RateSource.MARKET, RateSource.CUSTOM -> state.marketSnapshot.lastCheckedEpochSeconds
-    }
-    val detailText = lastCheckedEpochSeconds?.let {
+    val lastCheckedEpochSeconds = health.lastCheckedEpochSeconds
+    val detailText = if (isStale) {
+        text.refreshRequired
+    } else lastCheckedEpochSeconds?.let {
         text.checked(ValueFormatter.date(it, state.uiLanguage))
     } ?: when (state.rateSource) {
         RateSource.MARKET -> text.marketReference
@@ -401,7 +405,9 @@ private fun RateStatus(
             Surface(
                 modifier = Modifier.size(8.dp),
                 shape = CircleShape,
-                color = if (loadedFromSeed) {
+                color = if (isStale) {
+                    MaterialTheme.colorScheme.error
+                } else if (loadedFromSeed) {
                     MaterialTheme.colorScheme.tertiary
                 } else {
                     MaterialTheme.colorScheme.primary

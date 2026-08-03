@@ -8,9 +8,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import ru.abrikosov.cleanrate.ui.ConverterScreen
@@ -30,11 +27,12 @@ class MainActivity : ComponentActivity() {
                 val historyViewModel: HistoryViewModel = viewModel()
                 val converterState by converterViewModel.uiState.collectAsStateWithLifecycle()
                 val historyState by historyViewModel.uiState.collectAsStateWithLifecycle()
-                var showChart by rememberSaveable { mutableStateOf(false) }
 
-                BackHandler(enabled = showChart) { showChart = false }
-                LaunchedEffect(showChart) {
-                    if (showChart) {
+                BackHandler(enabled = converterState.isChartVisible) {
+                    converterViewModel.closeChart()
+                }
+                LaunchedEffect(converterState.isChartVisible) {
+                    if (converterState.isChartVisible) {
                         val quote = converterState.favorites
                             .firstOrNull { it != converterState.activeCode }
                             ?: if (converterState.activeCode == "USD") "EUR" else "USD"
@@ -46,12 +44,12 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                if (showChart) {
+                if (converterState.isChartVisible) {
                     RateChartScreen(
                         state = historyState,
                         language = converterState.uiLanguage,
                         allCodes = converterState.allCodes,
-                        onBack = { showChart = false },
+                        onBack = converterViewModel::closeChart,
                         onRefresh = historyViewModel::refresh,
                         onSelectBase = historyViewModel::selectBase,
                         onSelectQuote = historyViewModel::selectQuote,
@@ -63,7 +61,7 @@ class MainActivity : ComponentActivity() {
                     ConverterScreen(
                         state = converterState,
                         viewModel = converterViewModel,
-                        onOpenChart = { showChart = true },
+                        onOpenChart = converterViewModel::openChart,
                     )
                 }
             }

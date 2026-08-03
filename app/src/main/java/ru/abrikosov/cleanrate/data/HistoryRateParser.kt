@@ -10,6 +10,8 @@ object HistoryRateParser {
         baseCode: String,
         quoteCode: String,
         expectedDate: LocalDate? = null,
+        requireFresh: Boolean = false,
+        today: LocalDate = LocalDate.now(),
     ): HistoricalRatePoint? = runCatching {
         val normalizedBase = baseCode.lowercase()
         val normalizedQuote = quoteCode.lowercase()
@@ -19,6 +21,7 @@ object HistoryRateParser {
         val root = JSONObject(rawJson)
         val date = LocalDate.parse(root.getString("date"))
         if (expectedDate != null) check(date == expectedDate)
+        check(!requireFresh || RateFreshnessPolicy.isMarketFresh(date, today))
 
         val rates = root.getJSONObject(normalizedBase)
         val rate = rates.get(normalizedQuote).toString().toBigDecimalOrNull()

@@ -72,6 +72,16 @@ class UiText(val language: UiLanguage) {
     )
     val changeLanguage = tr("Изменить язык", "Change language", "Changer de langue")
     val savedMarketRate = tr("Встроенный резервный курс", "Built-in fallback rates", "Taux de secours intégrés")
+    val outdatedRate = tr(
+        "Сохранённый курс устарел",
+        "Saved rates are out of date",
+        "Les taux enregistrés ne sont plus à jour",
+    )
+    val refreshRequired = tr(
+        "Нужно подключение для получения актуального курса",
+        "Connect to the internet to get current rates",
+        "Connectez-vous à Internet pour obtenir les taux actuels",
+    )
     val bankRatesNotSet = tr(
         "Курсы банка ещё не заданы",
         "Bank rates are not set yet",
@@ -115,6 +125,9 @@ class UiText(val language: UiLanguage) {
         "Tap or drag across the chart to choose a date",
         "Touchez ou faites glisser sur le graphique pour choisir une date",
     )
+    val selectChartPoint = tr("Выбрать дату на графике", "Select a chart date", "Choisir une date sur le graphique")
+    val previousChartPoint = tr("Предыдущая дата", "Previous date", "Date précédente")
+    val nextChartPoint = tr("Следующая дата", "Next date", "Date suivante")
     val showLatestValue = tr("К последнему", "Latest", "Dernier taux")
     val minimum = tr("Мин", "Min", "Min")
     val maximum = tr("Макс", "Max", "Max")
@@ -133,6 +146,11 @@ class UiText(val language: UiLanguage) {
         "Показана сохранённая история",
         "Showing saved history",
         "Historique enregistré affiché",
+    )
+    fun incompleteHistory(missingCount: Int) = tr(
+        "Количество дат без данных: $missingCount; интервалы показаны по календарю",
+        "Missing dates: $missingCount; spacing follows the calendar",
+        "Dates manquantes : $missingCount ; l’espacement suit le calendrier",
     )
     val historySource = tr(
         "Исторические данные · currency-api",

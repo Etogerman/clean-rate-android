@@ -14,6 +14,7 @@ import kotlinx.coroutines.launch
 import ru.abrikosov.cleanrate.data.ChartPeriod
 import ru.abrikosov.cleanrate.data.HistoricalRatePoint
 import ru.abrikosov.cleanrate.data.HistoricalRatesRepository
+import ru.abrikosov.cleanrate.data.filterHistoryAmountText
 
 data class HistoryUiState(
     val baseCode: String = "RUB",
@@ -24,6 +25,7 @@ data class HistoryUiState(
     val isLoading: Boolean = false,
     val loadedFromCache: Boolean = false,
     val isStale: Boolean = false,
+    val missingPointCount: Int = 0,
     val hasError: Boolean = false,
     val initialized: Boolean = false,
 ) {
@@ -59,7 +61,8 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
             baseCode = selection.baseCode,
             quoteCode = selection.quoteCode,
             period = selection.period,
-            amountText = editableNumber(defaultChartAmount(amount)),
+            amountText = selection.amountText
+                ?: filterHistoryAmountText(editableNumber(defaultChartAmount(amount))),
             initialized = true,
         )
         load(clearExisting = true)
@@ -93,6 +96,7 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
                 hasError = false,
                 loadedFromCache = false,
                 isStale = false,
+                missingPointCount = 0,
             )
         }
         saveSelection()
@@ -100,20 +104,8 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun setAmount(rawValue: String) {
-        val filtered = buildString {
-            var hasSeparator = false
-            rawValue.forEach { character ->
-                when {
-                    character.isDigit() -> append(character)
-                    character in charArrayOf(',', '.') && !hasSeparator -> {
-                        if (isEmpty()) append('0')
-                        append(character)
-                        hasSeparator = true
-                    }
-                }
-            }
-        }.take(MAX_AMOUNT_LENGTH)
-        _uiState.update { it.copy(amountText = filtered) }
+        _uiState.update { it.copy(amountText = filterHistoryAmountText(rawValue)) }
+        saveSelection()
     }
 
     fun refresh() {
@@ -130,6 +122,7 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
                 hasError = false,
                 loadedFromCache = false,
                 isStale = false,
+                missingPointCount = 0,
             )
         }
         saveSelection()
@@ -169,6 +162,7 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
                                 isLoading = false,
                                 loadedFromCache = history.loadedFromCache,
                                 isStale = history.isStale,
+                                missingPointCount = history.missingPointCount,
                                 hasError = false,
                             )
                         },
@@ -183,17 +177,18 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
 
     private fun saveSelection() {
         val state = _uiState.value
-        repository.saveSelection(state.baseCode, state.quoteCode, state.period)
+        repository.saveSelection(
+            baseCode = state.baseCode,
+            quoteCode = state.quoteCode,
+            period = state.period,
+            amountText = state.amountText,
+        )
     }
 
     private fun editableNumber(value: BigDecimal): String = value
         .setScale(8, RoundingMode.HALF_UP)
         .stripTrailingZeros()
         .toPlainString()
-
-    companion object {
-        private const val MAX_AMOUNT_LENGTH = 24
-    }
 }
 
 internal fun defaultChartAmount(amount: BigDecimal): BigDecimal =

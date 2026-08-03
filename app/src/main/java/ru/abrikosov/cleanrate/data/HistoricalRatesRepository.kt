@@ -2,12 +2,10 @@ package ru.abrikosov.cleanrate.data
 
 import android.content.Context
 import android.util.Log
-import java.io.ByteArrayOutputStream
-import java.net.HttpURLConnection
-import java.net.URL
-import java.nio.charset.StandardCharsets
+import androidx.core.content.edit
 import java.time.LocalDate
 import java.util.concurrent.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -15,6 +13,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 import ru.abrikosov.cleanrate.BuildConfig
@@ -39,7 +38,9 @@ class HistoricalRatesRepository(context: Context) {
         }
 
         try {
-            val fetched = fetchHistory(normalizedBase, normalizedQuote, period)
+            val fetched = withHistoryRequestTimeout(HISTORY_REQUEST_TIMEOUT_MILLIS) {
+                fetchHistory(normalizedBase, normalizedQuote, period)
+            }
             saveCached(fetched)
             Result.success(fetched)
         } catch (cancellation: CancellationException) {
@@ -65,15 +66,38 @@ class HistoricalRatesRepository(context: Context) {
         val period = runCatching {
             ChartPeriod.valueOf(preferences.getString(KEY_SELECTED_PERIOD, null) ?: ChartPeriod.MONTH.name)
         }.getOrDefault(ChartPeriod.MONTH)
-        return HistorySelection(baseCode = base, quoteCode = quote, period = period)
+        val amountText = validatedHistoryAmountText(
+            preferences.getString(KEY_SELECTED_AMOUNT, null),
+        )
+        return HistorySelection(
+            baseCode = base,
+            quoteCode = quote,
+            period = period,
+            amountText = amountText,
+        )
     }
 
-    fun saveSelection(baseCode: String, quoteCode: String, period: ChartPeriod) {
-        preferences.edit()
-            .putString(KEY_SELECTED_BASE, baseCode)
-            .putString(KEY_SELECTED_QUOTE, quoteCode)
-            .putString(KEY_SELECTED_PERIOD, period.name)
-            .apply()
+    fun saveSelection(
+        baseCode: String,
+        quoteCode: String,
+        period: ChartPeriod,
+        amountText: String?,
+    ) {
+        preferences.edit {
+            putString(KEY_SELECTED_BASE, baseCode)
+            putString(KEY_SELECTED_QUOTE, quoteCode)
+            putString(KEY_SELECTED_PERIOD, period.name)
+            if (amountText == null) {
+                remove(KEY_SELECTED_AMOUNT)
+            } else {
+                val validatedAmount = validatedHistoryAmountText(amountText)
+                if (validatedAmount == null) {
+                    remove(KEY_SELECTED_AMOUNT)
+                } else {
+                    putString(KEY_SELECTED_AMOUNT, validatedAmount)
+                }
+            }
+        }
     }
 
     private suspend fun fetchHistory(
@@ -81,10 +105,12 @@ class HistoricalRatesRepository(context: Context) {
         quoteCode: String,
         period: ChartPeriod,
     ): HistoricalRates = coroutineScope {
-        val latestJson = downloadJson(dateToken = "latest", baseCode = baseCode)
-        val latestPoint = checkNotNull(
-            HistoryRateParser.parsePoint(latestJson, baseCode, quoteCode),
-        ) { "Источник истории вернул некорректный последний курс" }
+        val latestPoint = downloadPoint(
+            dateToken = "latest",
+            baseCode = baseCode,
+            quoteCode = quoteCode,
+            expectedDate = null,
+        )
 
         val dates = HistorySampling.dates(latestPoint.date, period)
         val semaphore = Semaphore(MAX_PARALLEL_REQUESTS)
@@ -112,70 +138,65 @@ class HistoricalRatesRepository(context: Context) {
             period = period,
             points = points,
             savedAtEpochMillis = System.currentTimeMillis(),
+            requestedPointCount = dates.size,
         )
     }
 
-    private fun fetchPointOrNull(
+    private suspend fun fetchPointOrNull(
         date: LocalDate,
         baseCode: String,
         quoteCode: String,
     ): HistoricalRatePoint? = try {
-        val body = downloadJson(dateToken = date.toString(), baseCode = baseCode)
-        HistoryRateParser.parsePoint(body, baseCode, quoteCode, expectedDate = date)
+        downloadPoint(
+            dateToken = date.toString(),
+            baseCode = baseCode,
+            quoteCode = quoteCode,
+            expectedDate = date,
+        )
     } catch (cancellation: CancellationException) {
         throw cancellation
     } catch (_: Throwable) {
         null
     }
 
-    private fun downloadJson(dateToken: String, baseCode: String): String {
+    private suspend fun downloadPoint(
+        dateToken: String,
+        baseCode: String,
+        quoteCode: String,
+        expectedDate: LocalDate?,
+    ): HistoricalRatePoint {
         val base = baseCode.lowercase()
         val urls = listOf(
             "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@$dateToken/v1/currencies/$base.min.json",
             "https://$dateToken.currency-api.pages.dev/v1/currencies/$base.min.json",
         )
-        var lastError: Throwable? = null
-        urls.forEach { url ->
-            try {
-                return request(url)
-            } catch (cancellation: CancellationException) {
-                throw cancellation
-            } catch (error: Throwable) {
-                lastError = error
+        return firstValidSource(
+            sources = urls,
+            unavailableMessage = "Источник истории недоступен",
+        ) { url ->
+            val body = request(url)
+            checkNotNull(
+                HistoryRateParser.parsePoint(
+                    rawJson = body,
+                    baseCode = baseCode,
+                    quoteCode = quoteCode,
+                    expectedDate = expectedDate,
+                    requireFresh = expectedDate == null,
+                ),
+            ) {
+                "Источник истории вернул некорректный курс"
             }
         }
-        throw lastError ?: IllegalStateException("Источник истории недоступен")
     }
 
-    private fun request(address: String): String {
-        val connection = (URL(address).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = 10_000
-            readTimeout = 15_000
-            instanceFollowRedirects = true
-            setRequestProperty("Accept", "application/json")
-            setRequestProperty("User-Agent", "CleanRate/${BuildConfig.VERSION_NAME} Android")
-        }
-        try {
-            check(connection.responseCode in 200..299) {
-                "Источник истории ответил кодом ${connection.responseCode}"
-            }
-            val output = ByteArrayOutputStream()
-            connection.inputStream.use { input ->
-                val buffer = ByteArray(8_192)
-                var total = 0
-                while (true) {
-                    val read = input.read(buffer)
-                    if (read < 0) break
-                    total += read
-                    check(total <= MAX_RESPONSE_BYTES) { "Ответ источника истории слишком большой" }
-                    output.write(buffer, 0, read)
-                }
-            }
-            return output.toString(StandardCharsets.UTF_8.name())
-        } finally {
-            connection.disconnect()
-        }
+    private suspend fun request(address: String): String {
+        return HttpsClient.getText(
+            address = address,
+            accept = "application/json",
+            userAgent = "CleanRate/${BuildConfig.VERSION_NAME} Android",
+            maximumBytes = MAX_RESPONSE_BYTES,
+            serviceName = "Источник истории",
+        )
     }
 
     private fun loadCached(
@@ -205,6 +226,8 @@ class HistoricalRatesRepository(context: Context) {
                 period = period,
                 points = points,
                 savedAtEpochMillis = root.getLong("savedAt"),
+                requestedPointCount = root.optInt("requestedPointCount", points.size)
+                    .coerceAtLeast(points.size),
                 loadedFromCache = true,
             )
         }.getOrNull()
@@ -224,17 +247,32 @@ class HistoricalRatesRepository(context: Context) {
             .put("quote", history.quoteCode)
             .put("period", history.period.name)
             .put("savedAt", history.savedAtEpochMillis)
+            .put("requestedPointCount", history.requestedPointCount)
             .put("points", points)
-        preferences.edit()
-            .putString(cacheKey(history.baseCode, history.quoteCode, history.period), root.toString())
-            .apply()
+        val key = cacheKey(history.baseCode, history.quoteCode, history.period)
+        val savedAtByKey = preferences.all.keys
+            .asSequence()
+            .filter { it.startsWith(CACHE_KEY_PREFIX) }
+            .associateWith { cachedKey ->
+                preferences.getString(cachedKey, null)
+                    ?.let { raw -> runCatching { JSONObject(raw).optLong("savedAt", 0L) }.getOrDefault(0L) }
+                    ?: 0L
+            }
+            .toMutableMap()
+            .apply { this[key] = history.savedAtEpochMillis }
+        preferences.edit {
+            putString(key, root.toString())
+            HistoryCachePolicy.keysToEvict(savedAtByKey, MAX_CACHE_ENTRIES).forEach { cachedKey ->
+                remove(cachedKey)
+            }
+        }
     }
 
     private fun isFresh(history: HistoricalRates): Boolean =
         System.currentTimeMillis() - history.savedAtEpochMillis <= CACHE_FRESH_MILLIS
 
     private fun cacheKey(baseCode: String, quoteCode: String, period: ChartPeriod): String =
-        "history_${baseCode}_${quoteCode}_${period.name}"
+        "${CACHE_KEY_PREFIX}${baseCode}_${quoteCode}_${period.name}"
 
     companion object {
         const val ATTRIBUTION_URL = "https://github.com/fawazahmed0/exchange-api"
@@ -243,9 +281,22 @@ class HistoricalRatesRepository(context: Context) {
         private const val KEY_SELECTED_BASE = "selected_base"
         private const val KEY_SELECTED_QUOTE = "selected_quote"
         private const val KEY_SELECTED_PERIOD = "selected_period"
+        private const val KEY_SELECTED_AMOUNT = "selected_amount"
+        private const val CACHE_KEY_PREFIX = "history_"
         private const val MAX_PARALLEL_REQUESTS = 6
+        private const val MAX_CACHE_ENTRIES = 24
         private const val MAX_RESPONSE_BYTES = 64 * 1_024
+        private const val HISTORY_REQUEST_TIMEOUT_MILLIS = 60_000L
         private const val CACHE_FRESH_MILLIS = 20 * 60 * 60 * 1_000L
         private val CURRENCY_CODE = Regex("[A-Z]{3}")
     }
 }
+
+internal class HistoryRequestTimeoutException : IllegalStateException(
+    "Превышено время загрузки истории курса",
+)
+
+internal suspend fun <T : Any> withHistoryRequestTimeout(
+    timeoutMillis: Long,
+    block: suspend CoroutineScope.() -> T,
+): T = withTimeoutOrNull(timeoutMillis, block) ?: throw HistoryRequestTimeoutException()

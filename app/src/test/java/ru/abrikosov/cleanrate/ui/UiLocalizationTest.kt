@@ -6,6 +6,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Test
 import ru.abrikosov.cleanrate.data.CurrencyCatalog
+import ru.abrikosov.cleanrate.data.HistoricalRatePoint
 import ru.abrikosov.cleanrate.data.RateSource
 import ru.abrikosov.cleanrate.data.UiLanguage
 
@@ -88,11 +89,17 @@ class UiLocalizationTest {
 
     @Test
     fun `chart touch position selects the nearest historical point`() {
-        assertEquals(-1, ChartPointSelection.nearestIndex(100f, 0, 100f, 500f))
-        assertEquals(0, ChartPointSelection.nearestIndex(20f, 5, 100f, 500f))
-        assertEquals(1, ChartPointSelection.nearestIndex(200f, 5, 100f, 500f))
-        assertEquals(2, ChartPointSelection.nearestIndex(300f, 5, 100f, 500f))
-        assertEquals(4, ChartPointSelection.nearestIndex(700f, 5, 100f, 500f))
+        val start = java.time.LocalDate.of(2026, 7, 1)
+        val points = listOf(0L, 1L, 2L, 10L).map { day ->
+            HistoricalRatePoint(start.plusDays(day), BigDecimal.ONE)
+        }
+
+        assertEquals(-1, ChartPointSelection.nearestIndex(100f, emptyList(), 100f, 500f))
+        assertEquals(0, ChartPointSelection.nearestIndex(20f, points, 100f, 500f))
+        assertEquals(2, ChartPointSelection.nearestIndex(300f, points, 100f, 500f))
+        assertEquals(3, ChartPointSelection.nearestIndex(380f, points, 100f, 500f))
+        assertEquals(3, ChartPointSelection.nearestIndex(700f, points, 100f, 500f))
+        assertEquals(0.2f, ChartPointSelection.fractionForIndex(points, 2))
     }
 
     @Test
@@ -123,6 +130,14 @@ class UiLocalizationTest {
                 date = "17 июля",
                 rate = "54,2974",
             ),
+        )
+    }
+
+    @Test
+    fun `russian missing history text describes a count rather than a date list`() {
+        assertEquals(
+            "Количество дат без данных: 3; интервалы показаны по календарю",
+            UiText(UiLanguage.RUSSIAN).incompleteHistory(3),
         )
     }
 

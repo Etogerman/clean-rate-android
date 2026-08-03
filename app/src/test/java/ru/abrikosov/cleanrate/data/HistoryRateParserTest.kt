@@ -33,6 +33,42 @@ class HistoryRateParserTest {
     }
 
     @Test
+    fun `latest point rejects stale and implausibly future dates`() {
+        val today = LocalDate.of(2026, 8, 2)
+
+        assertNull(
+            HistoryRateParser.parsePoint(
+                rawJson = """{"date":"2026-07-28","rub":{"mga":53.9}}""",
+                baseCode = "RUB",
+                quoteCode = "MGA",
+                requireFresh = true,
+                today = today,
+            ),
+        )
+        assertNull(
+            HistoryRateParser.parsePoint(
+                rawJson = """{"date":"2026-08-04","rub":{"mga":53.9}}""",
+                baseCode = "RUB",
+                quoteCode = "MGA",
+                requireFresh = true,
+                today = today,
+            ),
+        )
+        assertEquals(
+            today,
+            requireNotNull(
+                HistoryRateParser.parsePoint(
+                    rawJson = """{"date":"2026-08-02","rub":{"mga":53.9}}""",
+                    baseCode = "RUB",
+                    quoteCode = "MGA",
+                    requireFresh = true,
+                    today = today,
+                ),
+            ).date,
+        )
+    }
+
+    @Test
     fun `rejects missing and non-positive rates`() {
         assertNull(
             HistoryRateParser.parsePoint(

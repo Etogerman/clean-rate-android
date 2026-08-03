@@ -18,6 +18,7 @@ class MarketRateParserTest {
                 rawJson = rawJson,
                 loadedFromSeed = true,
                 lastCheckedEpochSeconds = null,
+                today = LocalDate.of(2026, 8, 2),
             ),
         )
 
@@ -36,6 +37,30 @@ class MarketRateParserTest {
                 rawJson = """{"date":"2026-08-01","usd":{"usd":1,"eur":0.9}}""",
                 loadedFromSeed = false,
                 lastCheckedEpochSeconds = 1L,
+            ),
+        )
+    }
+
+    @Test
+    fun `устаревший или будущий живой снимок отклоняется`() {
+        val rawJson = seedFile().readText()
+
+        assertNull(
+            MarketRateParser.parse(
+                rawJson = rawJson,
+                loadedFromSeed = false,
+                lastCheckedEpochSeconds = 1L,
+                requireFresh = true,
+                today = LocalDate.of(2026, 8, 7),
+            ),
+        )
+        assertNull(
+            MarketRateParser.parse(
+                rawJson = rawJson,
+                loadedFromSeed = false,
+                lastCheckedEpochSeconds = 1L,
+                requireFresh = true,
+                today = LocalDate.of(2026, 7, 30),
             ),
         )
     }

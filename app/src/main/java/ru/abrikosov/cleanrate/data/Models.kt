@@ -34,6 +34,7 @@ data class RateSnapshot(
     val rateDate: LocalDate,
     val loadedFromSeed: Boolean = false,
     val lastCheckedEpochSeconds: Long? = null,
+    val isStale: Boolean = false,
 )
 
 data class CbrRateSnapshot(
@@ -41,6 +42,7 @@ data class CbrRateSnapshot(
     val officialDate: LocalDate,
     val loadedFromSeed: Boolean = false,
     val lastCheckedEpochSeconds: Long? = null,
+    val isStale: Boolean = false,
 )
 
 data class CurrencyMetadata(
